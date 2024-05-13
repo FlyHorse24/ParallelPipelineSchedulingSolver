@@ -3,6 +3,8 @@ painter package
 """
 import tkinter as tk
 
+from .utils import parse_microbatch_key
+
 
 class SchedulingPainter:
     """Scheduling Painter"""
@@ -30,12 +32,6 @@ class SchedulingPainter:
         else:
             self._highlight_state[item_id] = True
             canvas.itemconfig(item_id, fill="yellow")
-
-    def _parse_microbatch_key(self, key: str):
-        is_forward = key.startswith("f")
-        mid, pid = key.split("_")[1:]
-
-        return is_forward, int(pid), int(mid)
 
     def draw(self, data: dict) -> None:
         """draw with tkinter"""
@@ -79,7 +75,7 @@ class SchedulingPainter:
 
         # 3. Draw execution block for each microbatch according to start and end time
         for microbatch_key, offset in data.items():
-            is_forward, pid, mid = self._parse_microbatch_key(microbatch_key)
+            is_forward, pid, mid = parse_microbatch_key(microbatch_key)
 
             x0 = self._pp_align + offset
             y0 = (self._pp_height + self._pp_align) * pid + 5

@@ -13,7 +13,7 @@ def main():
         "backward_execution_time": 3,
         # stratiges: "strict", "double_interleaving", "full_interleaving",
         "sequential_order_constraint_strategy": "strict",
-        "max_activation_times": [4, 3, 2, 1],
+        "max_activation_counts": [4, 3, 2, 1],
     }
 
     simulator = Simulator(config)

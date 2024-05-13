@@ -2,8 +2,11 @@
 simulator package
 """
 import itertools
+import time
 import z3
+
 from .painter import SchedulingPainter
+from .utils import resort_microbatch_index
 
 
 class Simulator:
@@ -12,7 +15,7 @@ class Simulator:
     def __init__(self, config: dict) -> None:
         self._pp_size = config["pp_size"]
         self._num_microbatches = config["num_microbatches"]
-        self._max_activation_times = config["max_activation_times"]
+        self._max_activation_counts = config["max_activation_counts"]
 
         self._forward_length = config["forward_execution_time"]
         self._backward_length = config["backward_execution_time"]
@@ -162,7 +165,7 @@ class Simulator:
                         0,
                     )
 
-                self._solver.add(_actvaition_count <= self._max_activation_times[pp])
+                self._solver.add(_actvaition_count <= self._max_activation_counts[pp])
 
     def _build_constraints(self) -> None:
         for i in range(self._pp_size):
@@ -188,7 +191,7 @@ class Simulator:
         # constraint 2: no overlapping of forward and backward within each pipeline
         self._serial_computation_within_pipeline_constraint()
 
-        # constraint 3: the accumulation count of activations does not exceed max_activation_times
+        # constraint 3: the accumulation count of activations does not exceed max_activation_counts
         self._pipeline_activation_accumulation_constraint()
 
     def _build_optimize_objectives(self) -> None:
@@ -222,14 +225,17 @@ class Simulator:
         self._build_optimize_objectives()
 
         # 3. runs the solver.
+        start_time = time.time()
         print("Z3 Solver Solving...")
-        if self._solver.check() == z3.sat:
-            print("Result: SAT")
+        check = self._solver.check()
+        end_time = time.time()
+        if  check == z3.sat:
+            print(f"Result: SAT, Cost: {end_time - start_time:.2f}")
             # tranforms the result to a dictionary.
             model = self._solver.model()
             results = {str(key): model[key].as_long() for key in model}
-            results.pop('max_start_offset')
+            results.pop("max_start_offset")
             # 4. draws the result.
-            self._draw(results)
+            self._draw(resort_microbatch_index(self._num_microbatches ,results))
         else:
-            print("Result: UNSAT")
+            print(f"Result: UNSAT, Cost: {end_time - start_time:.2f}")
