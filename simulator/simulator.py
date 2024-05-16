@@ -24,11 +24,11 @@ class Simulator:
         ]
 
         assert isinstance(
-            self._forward_length, int
-        ), "forward_execution_time must be int"
+            self._forward_length, (list, tuple)
+        ), "forward_execution_time must be list or tuple"
         assert isinstance(
-            self._backward_length, int
-        ), "backward_execution_time must be int"
+            self._backward_length, (list, tuple)
+        ), "backward_execution_time must be list or tuple"
 
         assert self._sequential_order_constraint_strategy in (
             "strict",
@@ -46,18 +46,18 @@ class Simulator:
             for i in range(1, self._pp_size):
                 self._solver.add(
                     self._forward_offsets[i][mb]
-                    >= self._forward_offsets[i - 1][mb] + self._forward_length
+                    >= self._forward_offsets[i - 1][mb] + self._forward_length[i-1]
                 )
             # backward stages sequential constraint
             for i in range(self._pp_size - 1, 0, -1):
                 self._solver.add(
                     self._backward_offsets[i - 1][mb]
-                    >= self._backward_offsets[i][mb] + self._backward_length
+                    >= self._backward_offsets[i][mb] + self._backward_length[i]
                 )
             # forward-backward connection sequential constraint
             self._solver.add(
                 self._backward_offsets[self._pp_size - 1][mb]
-                >= self._forward_offsets[self._pp_size - 1][mb] + self._forward_length
+                >= self._forward_offsets[self._pp_size - 1][mb] + self._forward_length[self._pp_size - 1]
             )
 
     def _sequential_order_constraint_double_interleaving(self):
@@ -66,31 +66,31 @@ class Simulator:
             down_case = z3.And(
                 *[
                     self._forward_offsets[i][mb]
-                    >= self._forward_offsets[i - 1][mb] + self._forward_length
+                    >= self._forward_offsets[i - 1][mb] + self._forward_length[i-1]
                     for i in range(1, self._pp_size)
                 ],
                 *[
                     self._backward_offsets[i - 1][mb]
-                    >= self._backward_offsets[i][mb] + self._backward_length
+                    >= self._backward_offsets[i][mb] + self._backward_length[i]
                     for i in range(self._pp_size - 1, 0, -1)
                 ],
                 self._backward_offsets[self._pp_size - 1][mb]
-                >= self._forward_offsets[self._pp_size - 1][mb] + self._forward_length,
+                >= self._forward_offsets[self._pp_size - 1][mb] + self._forward_length[self._pp_size - 1],
             )
             # up pipe
             up_case = z3.And(
                 *[
                     self._forward_offsets[i - 1][mb]
-                    >= self._forward_offsets[i][mb] + self._forward_length
+                    >= self._forward_offsets[i][mb] + self._forward_length[i]
                     for i in range(self._pp_size - 1, 0, -1)
                 ],
                 *[
                     self._backward_offsets[i][mb]
-                    >= self._backward_offsets[i - 1][mb] + self._backward_length
+                    >= self._backward_offsets[i - 1][mb] + self._backward_length[i-1]
                     for i in range(1, self._pp_size)
                 ],
                 self._backward_offsets[0][mb]
-                >= self._forward_offsets[0][mb] + self._forward_length,
+                >= self._forward_offsets[0][mb] + self._forward_length[0],
             )
 
             self._solver.add(z3.Or(down_case, up_case))
@@ -105,19 +105,19 @@ class Simulator:
                         # forward sequential order
                         *[
                             self._forward_offsets[perm[i + 1]][mb]
-                            >= self._forward_offsets[perm[i]][mb] + self._forward_length
+                            >= self._forward_offsets[perm[i]][mb] + self._forward_length[perm[i]]
                             for i in range(len(perm) - 1)
                         ],
                         # corresponding backward order
                         *[
                             self._backward_offsets[perm[i - 1]][mb]
                             >= self._backward_offsets[perm[i]][mb]
-                            + self._backward_length
+                            + self._backward_length[perm[i]]
                             for i in range(len(perm) - 1, 0, -1)
                         ],
                         # forward-backward connection order
                         self._backward_offsets[perm[-1]][mb]
-                        >= self._forward_offsets[perm[-1]][mb] + self._forward_length,
+                        >= self._forward_offsets[perm[-1]][mb] + self._forward_length[perm[-1]],
                     )
                 )
 
@@ -130,14 +130,14 @@ class Simulator:
             for i, _ in enumerate(_pp_vars):
                 for j in range(i + 1, len(_pp_vars)):
                     _i_length = (
-                        self._forward_length
+                        self._forward_length[pp]
                         if i // self._num_microbatches == 0
-                        else self._backward_length
+                        else self._backward_length[pp]
                     )
                     _j_length = (
-                        self._forward_length
+                        self._forward_length[pp]
                         if j // self._num_microbatches == 0
-                        else self._backward_length
+                        else self._backward_length[pp]
                     )
                     self._solver.add(
                         z3.Or(
@@ -239,3 +239,58 @@ class Simulator:
             self._draw(resort_microbatch_index(self._num_microbatches ,results))
         else:
             print(f"Result: UNSAT, Cost: {end_time - start_time:.2f}")
+
+
+class Simulator4Draw1F1B(Simulator):
+    """Simulator for 1f1b drawing"""
+
+    def _1f1b_scheduling_constraint(self) -> None:
+        for i in range(0, self._pp_size):
+            num_warmup_microsteps = self._pp_size - i - 1
+            num_warmup_microsteps = min(num_warmup_microsteps, self._num_microbatches)
+            num_1f1b_micropairs = self._num_microbatches - num_warmup_microsteps
+
+            # warmup
+            for j in range(1, num_warmup_microsteps):
+                self._solver.add(self._forward_offsets[i][j] == self._forward_offsets[i][j-1] + self._forward_length[i])
+
+            # 1f1b
+            for j in range(1, num_1f1b_micropairs):
+                _forward_mb, _backward_mb = j+num_warmup_microsteps, j
+                self._solver.add(self._forward_offsets[i][_forward_mb] == self._backward_offsets[i][_backward_mb-1] + self._backward_length[i])
+                # self._solver.add(self._backward_offsets[i][_backward_mb] == self._forward_offsets[i][_forward_mb] + self._forward_length[i])
+
+            # cooldown
+            for j in range(1, num_warmup_microsteps):
+                _backward_mb = j+num_1f1b_micropairs
+                self._solver.add(self._backward_offsets[i][_backward_mb] == self._backward_offsets[i][_backward_mb-1] + self._backward_length[i])
+
+
+    def _build_constraints(self) -> None:
+        for i in range(self._pp_size):
+            for mb in range(self._num_microbatches):
+                self._forward_offsets[i].append(z3.Int(f"f_{mb}_{i}"))
+                self._solver.add(self._forward_offsets[i][-1] >= 0)
+                self._backward_offsets[i].append(z3.Int(f"b_{mb}_{i}"))
+                self._solver.add(self._backward_offsets[i][-1] >= 0)
+
+        # constraint 1-0: forward and backward of each microbatch
+        # are executed in sequential order
+        self._sequential_order_constraint_strict()
+
+        self._1f1b_scheduling_constraint()
+
+        # constraint 2: no overlapping of forward and backward within each pipeline
+        self._serial_computation_within_pipeline_constraint()
+
+    def _draw(self, results: dict) -> None:
+        painter_conf = {
+            "pp_size": self._pp_size,
+            "pp_height": 50,
+            "pp_align": 10,
+            "pixel_base": 5,
+            "forward_length": self._forward_length,
+            "backward_length": self._backward_length,
+        }
+
+        SchedulingPainter(painter_conf).draw(results)

@@ -14,8 +14,8 @@ class SchedulingPainter:
         self._pp_height = config["pp_height"]
         self._pp_align = config["pp_align"]
         self._pixel_base = config["pixel_base"]
-        self._forward_length = config["forward_length"] * config["pixel_base"]
-        self._backward_length = config["backward_length"] * config["pixel_base"]
+        self._forward_length = [_len * config["pixel_base"] for _len in config["forward_length"]]
+        self._backward_length = [_len * config["pixel_base"] for _len in config["backward_length"]]
 
         self._tk_root = tk.Tk()
         self._tk_root.title("SchedulingPainter")
@@ -38,8 +38,10 @@ class SchedulingPainter:
 
         # Convert data offset to pixels
         data = {key: val * self._pixel_base for key, val in data.items()}
+        max_key = max(data, key=data.get)
+        _, max_key_pid, _ = parse_microbatch_key(max_key)
 
-        canvas_width = max(data.values()) + self._backward_length + 2 * self._pp_align
+        canvas_width = data[max_key] + self._backward_length[max_key_pid] + 2 * self._pp_align
         canvas_height = (self._pp_height + self._pp_align) * self._pp_size
 
         # 0. Create label canvas
@@ -50,7 +52,7 @@ class SchedulingPainter:
         label_canvas.create_text(
             self._pp_align + 127,
             y_label,
-            text=f"{(max(data.values())+self._backward_length)//self._pixel_base}",
+            text=f"{(data[max_key] + self._backward_length[max_key_pid])//self._pixel_base}",
         )
 
         label_canvas.create_text(
@@ -79,7 +81,7 @@ class SchedulingPainter:
 
             x0 = self._pp_align + offset
             y0 = (self._pp_height + self._pp_align) * pid + 5
-            x1 = x0 + (self._forward_length if is_forward else self._backward_length)
+            x1 = x0 + (self._forward_length[pid] if is_forward else self._backward_length[pid])
             y1 = (self._pp_height + self._pp_align) * (pid + 1) - 5
 
             tag = f"p_{pid}_m_{mid}_{'f' if is_forward else 'b'}"
