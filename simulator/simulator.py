@@ -258,12 +258,6 @@ class Simulator4Draw1F1B(Simulator):
             for j in range(1, num_1f1b_micropairs):
                 _forward_mb, _backward_mb = j+num_warmup_microsteps, j
                 self._solver.add(self._forward_offsets[i][_forward_mb] == self._backward_offsets[i][_backward_mb-1] + self._backward_length[i])
-                # self._solver.add(self._backward_offsets[i][_backward_mb] == self._forward_offsets[i][_forward_mb] + self._forward_length[i])
-
-            # cooldown
-            for j in range(1, num_warmup_microsteps):
-                _backward_mb = j+num_1f1b_micropairs
-                self._solver.add(self._backward_offsets[i][_backward_mb] == self._backward_offsets[i][_backward_mb-1] + self._backward_length[i])
 
 
     def _build_constraints(self) -> None:
