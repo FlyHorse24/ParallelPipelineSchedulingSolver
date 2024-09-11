@@ -8,17 +8,18 @@ def main():
     """main function"""
     config = {
         "pp_size": 4,
-        "num_microbatches": 8,
-        "forward_execution_time": [2 for _ in range(4)],
-        "backward_execution_time": [3 for _ in range(4)],
-        # stratiges: "strict", "double_interleaving", "full_interleaving",
-        "sequential_order_constraint_strategy": "strict",
+        "num_microbatches": 4,
+        "forward_execution_time": [10 for _ in range(4)],
+        "backward_execution_time": [20 for _ in range(4)],
+        "weight_execution_time":[10 for _ in range(4)],
+        # stratiges: "double_interleaving_zero","zero"
+        "sequential_order_constraint_strategy": "double_interleaving_zero",
         "max_activation_counts": [4 for _ in range(4)],
+        "P2Pcommunication_time": 1,
     }
 
     simulator = Simulator(config)
     simulator.run()
-
 
 if __name__ == "__main__":
     main()

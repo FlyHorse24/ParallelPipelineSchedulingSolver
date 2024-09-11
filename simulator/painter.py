@@ -16,7 +16,8 @@ class SchedulingPainter:
         self._pixel_base = config["pixel_base"]
         self._forward_length = [_len * config["pixel_base"] for _len in config["forward_length"]]
         self._backward_length = [_len * config["pixel_base"] for _len in config["backward_length"]]
-
+        self._weight_length = [_len * config["pixel_base"] for _len in config["weight_length"]] 
+        
         self._tk_root = tk.Tk()
         self._tk_root.title("SchedulingPainter")
 
@@ -35,7 +36,6 @@ class SchedulingPainter:
 
     def draw(self, data: dict) -> None:
         """draw with tkinter"""
-
         # Convert data offset to pixels
         data = {key: val * self._pixel_base for key, val in data.items()}
         max_key = max(data, key=data.get)
@@ -74,18 +74,31 @@ class SchedulingPainter:
             x1 = canvas_width - self._pp_align
             y1 = (self._pp_height + self._pp_align) * (pid + 1) - 5
             main_canvas.create_rectangle(x0, y0, x1, y1, outline="black")
-
+     
         # 3. Draw execution block for each microbatch according to start and end time
         for microbatch_key, offset in data.items():
-            is_forward, pid, mid = parse_microbatch_key(microbatch_key)
+            flagnum, pid, mid = parse_microbatch_key(microbatch_key)
 
             x0 = self._pp_align + offset
             y0 = (self._pp_height + self._pp_align) * pid + 5
-            x1 = x0 + (self._forward_length[pid] if is_forward else self._backward_length[pid])
+            addx = 0
+            endstring = ''
+            color = ''
+            if flagnum == 1:
+                addx = self._forward_length[pid]
+                endstring = 'f'
+                color = "#00FF7F"
+            elif flagnum ==2:
+                addx = self._backward_length[pid]
+                endstring = 'b'
+                color = "#00BFFF"
+            elif flagnum == 3:
+                addx = self._weight_length[pid]
+                endstring = 'w'
+                color = "#BBBF00"
+            x1 = x0 + addx
             y1 = (self._pp_height + self._pp_align) * (pid + 1) - 5
-
-            tag = f"p_{pid}_m_{mid}_{'f' if is_forward else 'b'}"
-            color = "#00FF7F" if is_forward else "#00BFFF"
+            tag = f"p_{pid}_m_{mid}_" + endstring
 
             block = main_canvas.create_rectangle(x0, y0, x1, y1, fill=color, tags=tag)
             text = main_canvas.create_text(
@@ -120,9 +133,9 @@ class SchedulingPainter:
             )
 
             tags = [
-                f"p_{pid}_m_{self._item2mid[current_item]}_{fb}"
+                f"p_{pid}_m_{self._item2mid[current_item]}_{fbw}"
                 for pid in range(self._pp_size)
-                for fb in ("f", "b")
+                for fbw in ("f", "b", "w")
             ]
             items_same_microbatch = []
             for tag in tags:
