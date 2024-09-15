@@ -18,8 +18,8 @@ def main():
         "pp_size": 4,
         "num_microbatches": 4,
         "forward_execution_time": [10 for _ in range(4)],
-        "backward_execution_time": [20 for _ in range(4)],
-        "weight_execution_time":[10 for _ in range(4)],
+        "backward_execution_time": [24 for _ in range(4)],
+        "weight_execution_time":[9 for _ in range(4)],
         # stratiges: "strict", "double_interleaving", "full_interleaving","zero"
         "sequential_order_constraint_strategy": "zero",
         "max_activation_counts": None,
