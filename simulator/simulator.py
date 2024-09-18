@@ -346,7 +346,98 @@ class Simulator:
         else:
             print(f"Result: UNSAT, Cost: {end_time - start_time:.2f}")
 
-#class Simulator4DrawVshapezero(Simulator):
+class Simulator4DrawVshapeZero(Simulator):
+    def _sequential_order_constraint_Vshape_zero(self):
+        self._backward_length = [self._backward_length[i]-self._weight_length[i] for i in range(len(self._backward_length))]
+        #切割
+        self._forward_length1, self._forward_length2 = [_/2 for _ in self._forward_length]
+        self._backward_length1, self._backward_length2 = [_/2 for _ in self._backward_length]
+        self._weight_length1, self._weight_length2 = [_/2 for _ in self._weight_length] 
+
+        self._forward_offsets1, self._forward_offsets2 = self._forward_offsets
+        self._backward_offsets1, self._backward_offsets2 = self._backward_offsets
+        self._weight_offsets1, self._weight_offsets2 = self._weight_offsets
+        
+        for mb in range(self._num_microbatches):
+            # down pipe
+            forward_case = z3.And(
+                *[
+                    self._forward_offsets1[i][mb]
+                    >= self._forward_offsets1[i - 1][mb] + self._forward_length1[i-1] + self._p2pcomm_length
+                    for i in range(1, self._pp_size)
+                ],
+                *[
+                    self._forward_offsets2[i - 1][mb]
+                    >= self._forward_offsets2[i][mb] + self._forward_length2[i] + self._p2pcomm_length
+                    for i in range(self._pp_size - 1, 0, -1)
+                ],
+                self._forward_offsets2[self._pp_size - 1][mb]
+                >= self._forward_offsets1[self._pp_size - 1][mb] + self._forward_length1[self._pp_size - 1],
+            )
+            # up pipe
+            backward_case = z3.And(
+                *[
+                    self._backward_offsets2[i][mb]
+                    >= self._backward_offsets2[i - 1][mb] + self._backward_length2[i-1] + self._p2pcomm_length
+                    for i in range(1, self._pp_size)
+                ],
+                *[
+                    self._backward_offsets1[i - 1][mb]
+                    >= self._backward_offsets1[i][mb] + self._backward_length1[i] + self._p2pcomm_length
+                    for i in range(self._pp_size - 1, 0, -1)
+                ], 
+                *[
+                    self._weight_offsets2[i][mb]
+                    >= self._backward_offsets2[i][mb] + self._backward_length2[i]
+                    for i in range(self._pp_size)
+                ],
+                *[
+                    self._weight_offsets1[i][mb]
+                    >= self._backward_offsets1[i][mb] + self._backward_length1[i]
+                    for i in range(self._pp_size)
+                ],
+                self._backward_offsets1[self._pp_size - 1][mb]
+                >= self._backward_offsets2[self._pp_size - 1][mb] + self._backward_length2[self._pp_size - 1],
+            )
+
+            #
+            self._solver.add(
+                self._backward_offsets2[0][mb]
+                >= self._forward_offsets2[0][mb] + self._forward_length2[self._pp_size - 1]
+            )  
+            self._solver.add(z3.And(forward_case, backward_case))
+
+    def _build_constraints(self) -> None:
+        for i in range(self._pp_size):
+            for mb in range(self._num_microbatches):
+                self._forward_offsets[i].append(z3.Int(f"f_{mb}_{i}"))
+                self._solver.add(self._forward_offsets[i][-1] >= 0)
+                self._backward_offsets[i].append(z3.Int(f"b_{mb}_{i}"))
+                self._solver.add(self._backward_offsets[i][-1] >= 0)
+                self._weight_offsets[i].append(z3.Int(f"w_{mb}_{i}"))
+                self._solver.add(self._weight_offsets[i][-1] >= 0)
+
+        # constraint 1-0: forward and backward of each microbatch
+        # are executed in sequential order
+        
+        self._sequential_order_constraint_zero()
+
+        # constraint 2: no overlapping of forward and backward within each pipeline
+        self._serial_computation_within_pipeline_constraint_zero()
+
+    def _draw(self, results: dict) -> None:
+        painter_conf = {
+            "pp_size": self._pp_size,
+            "pp_height": 50,
+            "pp_align": 10,
+            "pixel_base": 5,
+            "forward_length": self._forward_length,
+            "backward_length": self._backward_length,
+            "weight_length": self._weight_length
+        }
+
+        SchedulingPainter(painter_conf).draw(results)
+        
     
 
 class Simulator4Draw1F1Bzero(Simulator):
