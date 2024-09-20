@@ -66,7 +66,6 @@ class Simulator:
             )
     
     def _sequential_order_constraint_zero(self):
-        self._backward_length = [self._backward_length[i]-self._weight_length[i] for i in range(len(self._backward_length))]
         for mb in range(self._num_microbatches):
             # forward stages sequential constraint
             for i in range(1, self._pp_size):
@@ -92,6 +91,22 @@ class Simulator:
                 self._backward_offsets[self._pp_size - 1][mb]
                 >= self._forward_offsets[self._pp_size - 1][mb] + self._forward_length[self._pp_size - 1]
             )
+
+            #同一stage中 mirobatch加先后
+        for mb in range(1,self._num_microbatches):
+            for i in range(self._pp_size):
+                self._solver.add(
+                    self._forward_offsets[i][mb]
+                    >= self._forward_offsets[i][mb-1] + self._forward_length[i],
+                )
+                self._solver.add(
+                     self._backward_offsets[i][mb]
+                    >= self._backward_offsets[i][mb-1] + self._backward_length[i],
+                )
+                self._solver.add(
+                     self._weight_offsets[i][mb]
+                    >= self._weight_offsets[i][mb-1] + self._weight_length[i],
+                )
 
     def _sequential_order_constraint_double_interleaving(self):
         for mb in range(self._num_microbatches):
@@ -304,10 +319,11 @@ class Simulator:
     def _build_optimize_objectives(self) -> None:
         # 1. minimize the execution time of each microbatch
         max_var = z3.Int("max_start_offset")
-
         for pp in range(self._pp_size):
-            for var in self._weight_offsets[pp]:
-                self._solver.add(max_var >= var)
+            # for var in self._weight_offsets[pp]:
+            #     self._solver.add(max_var >= var)
+            var = self._weight_offsets[pp][-1]
+            self._solver.add(max_var >= var)
         self._solver.minimize(max_var)
 
     def _draw(self, results: dict) -> None:
@@ -315,7 +331,7 @@ class Simulator:
             "pp_size": self._pp_size,
             "pp_height": 50,
             "pp_align": 10,
-            "pixel_base": 5,
+            "pixel_base": 15,
             "forward_length": self._forward_length,
             "backward_length": self._backward_length,
             "weight_length": self._weight_length
@@ -408,7 +424,7 @@ class Simulator4DrawVshapeZero(Simulator):
                 )
             self._solver.add(
                 self._forward_offsets2[self._pp_size - 1][mb]
-                == self._forward_offsets1[self._pp_size - 1][mb] + self._forward_length1[self._pp_size - 1]#>=
+                >= self._forward_offsets1[self._pp_size - 1][mb] + self._forward_length1[self._pp_size - 1]#>=
             )
 
             # backward
@@ -425,7 +441,7 @@ class Simulator4DrawVshapeZero(Simulator):
             
             self._solver.add(
                 self._backward_offsets1[self._pp_size - 1][mb]
-                == self._backward_offsets2[self._pp_size - 1][mb] + self._backward_length2[self._pp_size - 1],#>=
+                >= self._backward_offsets2[self._pp_size - 1][mb] + self._backward_length2[self._pp_size - 1],#>=
             )
             
             #coonect for and back
@@ -469,18 +485,18 @@ class Simulator4DrawVshapeZero(Simulator):
                     >= self._weight_offsets1[i][mb-1] + self._weight_length1[i],
                 )
 
-                # self._solver.add(
-                #     self._forward_offsets2[i][mb]
-                #     >= self._forward_offsets2[i][mb-1] + self._forward_length2[i],
-                # )
-                # self._solver.add(
-                #      self._backward_offsets2[i][mb]
-                #     >= self._backward_offsets2[i][mb-1] + self._backward_length2[i],
-                # )
-                # self._solver.add(
-                #      self._weight_offsets2[i][mb]
-                #     >= self._weight_offsets2[i][mb-1] + self._weight_length2[i],
-                # )
+                self._solver.add(
+                    self._forward_offsets2[i][mb]
+                    >= self._forward_offsets2[i][mb-1] + self._forward_length2[i],
+                )
+                self._solver.add(
+                     self._backward_offsets2[i][mb]
+                    >= self._backward_offsets2[i][mb-1] + self._backward_length2[i],
+                )
+                self._solver.add(
+                     self._weight_offsets2[i][mb]
+                    >= self._weight_offsets2[i][mb-1] + self._weight_length2[i],
+                )
 
 #另一种写法
 # forward_case = z3.And(
@@ -610,11 +626,25 @@ class Simulator4DrawVshapeZero(Simulator):
 
     def _build_optimize_objectives(self) -> None:
         # 1. minimize the execution time of each microbatch
-        max_var = z3.Int("max_start_offset")
+        # max_var = z3.Int("max_start_offset")
+        # for pp in range(self._pp_size):
+        #     for var in self._weight_offsets2[pp]:
+        #         self._solver.add(max_var >= var)
+        # self._solver.minimize(max_var)
+
+        # max_var = z3.Int("max_start_offset")
+        # for pp in range(self._pp_size):
+        #     var = self._weight_offsets2[pp][-1]
+        #     self._solver.add(max_var >= var)
+        # self._solver.minimize(max_var)
+
+        max_stage = z3.Int("max_start_offset")
         for pp in range(self._pp_size):
-            for var in self._weight_offsets2[pp]:
-                self._solver.add(max_var >= var)
-        self._solver.minimize(max_var)
+            max_var = self._weight_offsets2[pp][-1]
+            min_var = self._forward_offsets1[pp][0]
+            stage = max_var - min_var
+            self._solver.add(max_stage >= stage)
+        self._solver.minimize(max_stage)
 
     def _draw(self, results: dict) -> None:
         painter_conf = {
@@ -700,7 +730,7 @@ class Simulator4Draw1F1Bzero(Simulator):
             "pp_size": self._pp_size,
             "pp_height": 50,
             "pp_align": 10,
-            "pixel_base": 5,
+            "pixel_base": 15,
             "forward_length": self._forward_length,
             "backward_length": self._backward_length,
             "weight_length": self._weight_length

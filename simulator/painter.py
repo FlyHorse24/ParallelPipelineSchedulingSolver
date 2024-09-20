@@ -41,7 +41,7 @@ class SchedulingPainter:
         max_key = max(data, key=data.get)
         _, max_key_pid, _ = parse_microbatch_key(max_key)
 
-        canvas_width = data[max_key] + self._backward_length[max_key_pid] + 2 * self._pp_align
+        canvas_width = data[max_key] + self._weight_length[max_key_pid] + 2 * self._pp_align
         canvas_height = (self._pp_height + self._pp_align) * self._pp_size
 
         # 0. Create label canvas
@@ -52,7 +52,7 @@ class SchedulingPainter:
         label_canvas.create_text(
             self._pp_align + 127,
             y_label,
-            text=f"{(data[max_key] + self._backward_length[max_key_pid])//self._pixel_base}",
+            text=f"{(data[max_key] + self._weight_length[max_key_pid])//self._pixel_base}",
         )
 
         label_canvas.create_text(
@@ -87,22 +87,22 @@ class SchedulingPainter:
             if flagnum == 1:
                 addx = self._forward_length[pid]
                 endstring = 'f'
-                color = "#00FF7F"
+                color = "#00BFFF"
             elif flagnum ==2:
                 addx = self._backward_length[pid]
                 endstring = 'b'
-                color = "#00BFFF"
+                color = "#00FFFF"
             elif flagnum == 3:
                 addx = self._weight_length[pid]
                 endstring = 'w'
-                color = "#BBBF00"
+                color = "#00FF00"
             x1 = x0 + addx
             y1 = (self._pp_height + self._pp_align) * (pid + 1) - 5
             tag = f"p_{pid}_m_{mid}_" + endstring
 
             block = main_canvas.create_rectangle(x0, y0, x1, y1, fill=color, tags=tag)
             text = main_canvas.create_text(
-                (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid+1}"
+                (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid}"
             )
 
             # print(f"block {tag}: {x0}, {y0}, {x1}, {y1}", flush=True)
@@ -189,7 +189,7 @@ class SchedulingPainterVshape:
         max_key = max(data, key=data.get)
         _, max_key_pid, _ = parse_microbatch_key_Vshape(max_key)
 
-        canvas_width = data[max_key] + self._backward_length2[max_key_pid] + 2 * self._pp_align
+        canvas_width = data[max_key] + self._weight_length2[max_key_pid] + 2 * self._pp_align
         canvas_height = (self._pp_height + self._pp_align) * self._pp_size
 
         # 0. Create label canvas
@@ -200,7 +200,7 @@ class SchedulingPainterVshape:
         label_canvas.create_text(
             self._pp_align + 127,
             y_label,
-            text=f"{(data[max_key] + self._backward_length2[max_key_pid])//self._pixel_base}",
+            text=f"{(data[max_key] + self._weight_length2[max_key_pid])//self._pixel_base}",
         )
 
         label_canvas.create_text(
@@ -235,28 +235,27 @@ class SchedulingPainterVshape:
             if flagnum == 1:
                 addx = self._forward_length1[pid]
                 endstring = 'f1'
-                color = "#00BF00"
-
+                color = "#00BFFF"
             elif flagnum ==2:
                 addx = self._backward_length1[pid]
                 endstring = 'b1'
-                color = "#00BFFF"
+                color = "#00FFFF"
             elif flagnum == 3:
                 addx = self._weight_length1[pid]
                 endstring = 'w1'
-                color = "#FF0000"
+                color = "#00FF00"
             if flagnum == 4:
                 addx = self._forward_length2[pid]
                 endstring = 'f2'
-                color = "#00BF00"
+                color = "#00BFFF"
             elif flagnum ==5:
                 addx = self._backward_length2[pid]
                 endstring = 'b2'
-                color = "#00BFFF"
+                color = "#00FFFF"
             elif flagnum == 6:
                 addx = self._weight_length2[pid]
                 endstring = 'w2'
-                color = "#FF0000"
+                color = "#00FF00"
             x1 = x0 + addx
             y1 = (self._pp_height + self._pp_align) * (pid + 1) - 5
             tag = f"p_{pid}_m_{mid}_" + endstring
@@ -264,11 +263,11 @@ class SchedulingPainterVshape:
             block = main_canvas.create_rectangle(x0, y0, x1, y1, fill=color, tags=tag)
             if flagnum == 1 or flagnum == 2 or flagnum == 3:
                 text = main_canvas.create_text(
-                    (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid+1}"
+                    (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid}", font="Arial"
                 )
             elif flagnum == 4 or flagnum == 5 or flagnum == 6:
                 text = main_canvas.create_text(
-                    (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid+1}"+"*", font="Arial"  
+                    (x0 + x1) // 2, (y0 + y1) // 2, text=f"{mid}"+"*", font="Arial"
                 )
 
             # print(f"block {tag}: {x0}, {y0}, {x1}, {y1}", flush=True)

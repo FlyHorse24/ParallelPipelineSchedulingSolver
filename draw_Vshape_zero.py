@@ -16,7 +16,7 @@ def main():
     # }
     config = {
         "pp_size": 4,
-        "num_microbatches": 4,
+        "num_microbatches": 6,
         "forward_execution_time": [4 for _ in range(4)],
         "backward_execution_time": [6 for _ in range(4)],
         "weight_execution_time":[4 for _ in range(4)],
