@@ -1,7 +1,7 @@
 """
 main package
 """
-from simulator.simulator import Simulator4DrawVshapeZero
+from simulator.gurobi import Simulator4DrawVshapeZero
 
 
 def main():
