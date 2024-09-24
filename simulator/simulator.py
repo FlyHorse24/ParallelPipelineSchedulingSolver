@@ -444,7 +444,7 @@ class Simulator4DrawVshapeZero(Simulator):
                 >= self._backward_offsets2[self._pp_size - 1][mb] + self._backward_length2[self._pp_size - 1],#>=
             )
             
-            #coonect for and back
+            #connnect for and back
             self._solver.add(
                 self._backward_offsets2[0][mb]
                 >= self._forward_offsets2[0][mb] + self._forward_length2[self._pp_size - 1]
@@ -453,17 +453,17 @@ class Simulator4DrawVshapeZero(Simulator):
             #weight
             for i in range(self._pp_size):
                 self._solver.add(
-                    self._weight_offsets2[i][mb]
-                    >= self._weight_offsets1[i][mb] + self._weight_length1[i]
+                    self._weight_offsets1[i][mb]
+                    >= self._weight_offsets2[i][mb] + self._weight_length2[i]
                 )
 
-            for i in range(self._pp_size):
+            # for i in range(self._pp_size):
                 self._solver.add(
                     self._weight_offsets1[i][mb]
                     >= self._backward_offsets1[i][mb] + self._backward_length1[i]
                 )
             
-            for i in range(self._pp_size):
+            # for i in range(self._pp_size):
                 self._solver.add(
                     self._weight_offsets2[i][mb]
                     >= self._backward_offsets2[i][mb] + self._backward_length2[i]
@@ -597,6 +597,61 @@ class Simulator4DrawVshapeZero(Simulator):
                             _pp_vars[j] + _j_length <= _pp_vars[i],
                         )
                     )
+    def _pipeline_activation_accumulation_constraint_Vshape(self):
+        back_activationMem = 1
+        weight_activationMem = 1
+        for pp in range(self._pp_size):
+            # calculate the maximum activation value for this pp
+            for mb in range(self._num_microbatches):
+                #backward2
+                _actvaition_count = 1
+                _backward_var = self._backward_offsets2[pp][mb]
+
+                for other_mb in range(self._num_microbatches):
+                    _actvaition_count += z3.If(
+                        z3.And(#这里是所有mb
+                            self._backward_offsets1[pp][other_mb] > _backward_var,
+                            self._forward_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        1,
+                        0,
+                    )
+                    if other_mb == mb:
+                        continue
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._backward_offsets2[pp][other_mb] > _backward_var,
+                            self._forward_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        1,
+                        0,
+                    )
+                self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
+
+                #backward1
+                _actvaition_count = 1 
+                _backward_var = self._backward_offsets1[pp][mb]
+
+                for other_mb in range(self._num_microbatches):
+                    if other_mb == mb:
+                        continue
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._backward_offsets1[pp][other_mb] > _backward_var,
+                            self._forward_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        1,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._backward_offsets2[pp][other_mb] > _backward_var,
+                            self._forward_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        1,
+                        0,
+                    )
+                self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
 
     def _build_constraints(self) -> None:
         for i in range(self._pp_size):
@@ -624,23 +679,25 @@ class Simulator4DrawVshapeZero(Simulator):
         # constraint 2: no overlapping of forward and backward within each pipeline
         self._serial_computation_within_pipeline_constraint_Vshape_zero()
 
+        self._pipeline_activation_accumulation_constraint_Vshape()
+
     def _build_optimize_objectives(self) -> None:
         # 1. minimize the execution time of each microbatch
         # max_var = z3.Int("max_start_offset")
         # for pp in range(self._pp_size):
-        #     for var in self._weight_offsets2[pp]:
+        #     for var in self._weight_offsets1[pp]:
         #         self._solver.add(max_var >= var)
         # self._solver.minimize(max_var)
 
         # max_var = z3.Int("max_start_offset")
         # for pp in range(self._pp_size):
-        #     var = self._weight_offsets2[pp][-1]
+        #     var = self._weight_offsets1[pp][-1]
         #     self._solver.add(max_var >= var)
         # self._solver.minimize(max_var)
 
         max_stage = z3.Int("max_start_offset")
         for pp in range(self._pp_size):
-            max_var = self._weight_offsets2[pp][-1]
+            max_var = self._weight_offsets1[pp][-1]
             min_var = self._forward_offsets1[pp][0]
             stage = max_var - min_var
             self._solver.add(max_stage >= stage)
