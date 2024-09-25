@@ -376,6 +376,11 @@ class Simulator4DrawVshapeZero(Simulator):
             "sequential_order_constraint_strategy"
         ]
         self._p2pcomm_length = config["P2Pcommunication_time"]
+        self._recomputation = config["recomputation"]
+        self._back_activationMem = config["back_activationMem"]
+        self._weight_activationMem = config["weight_activationMem"]
+        self._max_activation_counts = [_*(self._back_activationMem+self._weight_activationMem) for _ in self._max_activation_counts]
+
         assert isinstance(
             self._forward_length, (list, tuple)
         ), "forward_execution_time must be list or tuple"
@@ -497,54 +502,6 @@ class Simulator4DrawVshapeZero(Simulator):
                      self._weight_offsets2[i][mb]
                     >= self._weight_offsets2[i][mb-1] + self._weight_length2[i],
                 )
-
-#另一种写法
-# forward_case = z3.And(
-#     *[
-#         self._forward_offsets1[i][mb]
-#         >= self._forward_offsets1[i - 1][mb] + self._forward_length1[i-1] + self._p2pcomm_length
-#         for i in range(1, self._pp_size)
-#     ],
-#     *[
-#         self._forward_offsets2[i - 1][mb]
-#         >= self._forward_offsets2[i][mb] + self._forward_length2[i] + self._p2pcomm_length
-#         for i in range(self._pp_size - 1, 0, -1)
-#     ],
-#     self._forward_offsets2[self._pp_size - 1][mb]
-#     >= self._forward_offsets1[self._pp_size - 1][mb] + self._forward_length1[self._pp_size - 1],
-# )
-    
-# backward_case = z3.And(
-#     *[
-#         self._backward_offsets2[i][mb]
-#         >= self._backward_offsets2[i - 1][mb] + self._backward_length2[i-1] + self._p2pcomm_length
-#         for i in range(1, self._pp_size)
-#     ],
-#     *[
-#         self._backward_offsets1[i - 1][mb]
-#         >= self._backward_offsets1[i][mb] + self._backward_length1[i] + self._p2pcomm_length
-#         for i in range(self._pp_size - 1, 0, -1)
-#     ], 
-#     *[
-#         self._weight_offsets2[i][mb]
-#         >= self._backward_offsets2[i][mb] + self._backward_length2[i]
-#         for i in range(self._pp_size)
-#     ],
-#     *[
-#         self._weight_offsets1[i][mb]
-#         >= self._backward_offsets1[i][mb] + self._backward_length1[i]
-#         for i in range(self._pp_size)
-#     ],
-#     self._backward_offsets1[self._pp_size - 1][mb]
-#     >= self._backward_offsets2[self._pp_size - 1][mb] + self._backward_length2[self._pp_size - 1],
-# )
-
-# #connec for and back
-# self._solver.add(
-#     self._backward_offsets2[0][mb]
-#     >= self._forward_offsets2[0][mb] + self._forward_length2[self._pp_size - 1]
-# )  
-# self._solver.add(z3.And(forward_case, backward_case))
                 
     def _vshape_1f1b_scheduling_constraint(self) -> None: #加上此类约束，速度反而降低一些
         for i in range(0, self._pp_size):
@@ -598,13 +555,14 @@ class Simulator4DrawVshapeZero(Simulator):
                         )
                     )
     def _pipeline_activation_accumulation_constraint_Vshape(self):
-        back_activationMem = 1
-        weight_activationMem = 1
+        if self._recomputation:
+            self._back_activationMem = 1
+        batch_activationMem = self._back_activationMem+self._weight_activationMem
         for pp in range(self._pp_size):
             # calculate the maximum activation value for this pp
             for mb in range(self._num_microbatches):
                 #backward2
-                _actvaition_count = 1
+                _actvaition_count = batch_activationMem
                 _backward_var = self._backward_offsets2[pp][mb]
 
                 for other_mb in range(self._num_microbatches):
@@ -613,23 +571,56 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._backward_offsets1[pp][other_mb] > _backward_var,
                             self._forward_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        1,
+                        batch_activationMem,
                         0,
                     )
+
                     if other_mb == mb:
                         continue
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets1[pp][other_mb] > _backward_var,
+                            self._backward_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        -self._back_activationMem,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        -self._weight_activationMem,
+                        0,
+                    )
+
                     _actvaition_count += z3.If(
                         z3.And(
                             self._backward_offsets2[pp][other_mb] > _backward_var,
                             self._forward_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        1,
+                        batch_activationMem,
+                        0,
+                    )
+
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets2[pp][other_mb] > _backward_var,
+                            self._backward_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        -self._back_activationMem,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        -self._weight_activationMem,
                         0,
                     )
                 self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
 
                 #backward1
-                _actvaition_count = 1 
+                _actvaition_count = batch_activationMem 
                 _backward_var = self._backward_offsets1[pp][mb]
 
                 for other_mb in range(self._num_microbatches):
@@ -640,15 +631,46 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._backward_offsets1[pp][other_mb] > _backward_var,
                             self._forward_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        1,
+                        batch_activationMem,
                         0,
                     )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets1[pp][other_mb] > _backward_var,
+                            self._backward_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        -self._back_activationMem,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets1[pp][other_mb] < _backward_var,
+                        ),
+                        -self._weight_activationMem,
+                        0,
+                    )
+
                     _actvaition_count += z3.If(
                         z3.And(
                             self._backward_offsets2[pp][other_mb] > _backward_var,
                             self._forward_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        1,
+                        batch_activationMem,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets2[pp][other_mb] > _backward_var,
+                            self._backward_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        -self._back_activationMem,
+                        0,
+                    )
+                    _actvaition_count += z3.If(
+                        z3.And(
+                            self._weight_offsets2[pp][other_mb] < _backward_var,
+                        ),
+                        -self._weight_activationMem,
                         0,
                     )
                 self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
