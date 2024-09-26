@@ -381,6 +381,31 @@ class Simulator4DrawVshapeZero(Simulator):
         self._weight_activationMem = config["weight_activationMem"]
         self._max_activation_counts = [_*(self._back_activationMem+self._weight_activationMem) for _ in self._max_activation_counts]
 
+        #以下是精确计算
+        self._layersPerStage = config["layersPerStage"]
+        self._attentionheads = config["attentionheads"]
+        self._hidden = config["hidden"]
+        self._sequencelen = config["sequencelen"]
+   
+        F_timePerLayer = 6*self._hidden+self._sequencelen
+        W_timePerLayer = 6*self._hidden
+        W_AcMemPerLayer = 32*self._hidden
+
+        if self._recomputation:
+            B_timePerLayer = 6*self._hidden+self._sequencelen+3*self._sequencelen
+            B_AcMemPerLayer = 34*self._hidden
+        else: 
+            B_timePerLayer = 6*self._hidden+self._sequencelen+2*self._sequencelen
+            B_AcMemPerLayer = 34*self._hidden + 5*self._attentionheads*self._sequencelen
+
+        self.F_timePerStage = [_*F_timePerLayer for _ in self._layersPerStage]
+        self.B_timePerStage = [_*B_timePerLayer for _ in self._layersPerStage]
+        self.W_timePerStage = [_*W_timePerLayer for _ in self._layersPerStage]
+
+        self.B_AcMemPerStage = [_*B_AcMemPerLayer for _ in self._layersPerStage]
+        self.W_AcMemPerStage = [_*W_AcMemPerLayer for _ in self._layersPerStage]
+        ###
+        
         assert isinstance(
             self._forward_length, (list, tuple)
         ), "forward_execution_time must be list or tuple"
@@ -413,6 +438,94 @@ class Simulator4DrawVshapeZero(Simulator):
         self._backward_length2 = [_/2 for _ in self._backward_length]
         self._weight_length2 = [_/2 for _ in self._weight_length] 
     
+
+    def _sequential_order_constraint_Interleave_zero(self):
+        for mb in range(self._num_microbatches):
+            # forward
+            for i in range(1, self._pp_size):
+                self._solver.add(
+                    self._forward_offsets1[i][mb]
+                    >= self._forward_offsets1[i - 1][mb] + self._forward_length1[i-1] + self._p2pcomm_length
+                )
+                self._solver.add(
+                    self._forward_offsets2[i][mb]
+                    >= self._forward_offsets2[i - 1][mb] + self._forward_length2[i-1] + self._p2pcomm_length
+                )
+            
+            for i in range(self._pp_size):
+                self._solver.add(
+                    self._forward_offsets2[i][mb]
+                    >= self._forward_offsets1[i][mb] + self._forward_length1[i]
+                )
+
+            # backward
+            for i in range(self._pp_size - 1, 0, -1):
+                self._solver.add(
+                    self._backward_offsets2[i-1][mb]
+                    >= self._backward_offsets2[i][mb] + self._backward_length2[i] + self._p2pcomm_length
+                )
+                self._solver.add(
+                    self._backward_offsets1[i-1][mb]
+                    >= self._backward_offsets1[i][mb] + self._backward_length1[i] + self._p2pcomm_length
+                )
+
+            for i in range(self._pp_size):
+                self._solver.add(
+                    self._backward_offsets1[i][mb]
+                    >= self._backward_offsets2[i][mb] + self._backward_length2[i]
+                )
+    
+            #connnect for and back
+            self._solver.add(
+                self._backward_offsets2[self._pp_size - 1][mb]
+                >= self._forward_offsets2[self._pp_size - 1][mb] + self._forward_length2[self._pp_size - 1]#>=
+            )
+
+            #weight
+            for i in range(self._pp_size):
+                self._solver.add(
+                    self._weight_offsets1[i][mb]
+                    >= self._weight_offsets2[i][mb] + self._weight_length2[i]
+                )
+                self._solver.add(
+                    self._weight_offsets1[i][mb]
+                    >= self._backward_offsets1[i][mb] + self._backward_length1[i]
+                )
+                self._solver.add(
+                    self._weight_offsets2[i][mb]
+                    >= self._backward_offsets2[i][mb] + self._backward_length2[i]
+                )
+
+        #mirobatch顺序，加上后速读显著增加
+        for mb in range(1,self._num_microbatches):
+            for i in range(self._pp_size):
+                self._solver.add(
+                    self._forward_offsets1[i][mb]
+                    >= self._forward_offsets1[i][mb-1] + self._forward_length1[i],
+                )
+                self._solver.add(
+                     self._backward_offsets1[i][mb]
+                    >= self._backward_offsets1[i][mb-1] + self._backward_length1[i],
+                )
+                self._solver.add(
+                     self._weight_offsets1[i][mb]
+                    >= self._weight_offsets1[i][mb-1] + self._weight_length1[i],
+                )
+
+                self._solver.add(
+                    self._forward_offsets2[i][mb]
+                    >= self._forward_offsets2[i][mb-1] + self._forward_length2[i],
+                )
+                self._solver.add(
+                     self._backward_offsets2[i][mb]
+                    >= self._backward_offsets2[i][mb-1] + self._backward_length2[i],
+                )
+                self._solver.add(
+                     self._weight_offsets2[i][mb]
+                    >= self._weight_offsets2[i][mb-1] + self._weight_length2[i],
+                )
+
+
     def _sequential_order_constraint_Vshape_zero(self):
         for mb in range(self._num_microbatches):
             # forward
@@ -554,6 +667,7 @@ class Simulator4DrawVshapeZero(Simulator):
                             _pp_vars[j] + _j_length <= _pp_vars[i],
                         )
                     )
+
     def _pipeline_activation_accumulation_constraint_Vshape(self):
         if self._recomputation:
             self._back_activationMem = 1
@@ -693,10 +807,9 @@ class Simulator4DrawVshapeZero(Simulator):
                 self._solver.add(self._weight_offsets2[i][-1] >= 0)
    
         # constraint 1-0: forward and backward of each microbatch
-        # are executed in sequential order
-        #self._vshape_1f1b_scheduling_constraint()        
-
+        # are executed in sequential order    
         self._sequential_order_constraint_Vshape_zero()
+        #self._sequential_order_constraint_Interleave_zero()
 
         # constraint 2: no overlapping of forward and backward within each pipeline
         self._serial_computation_within_pipeline_constraint_Vshape_zero()
