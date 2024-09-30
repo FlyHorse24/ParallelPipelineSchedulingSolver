@@ -8,7 +8,7 @@ import z3
 from .painter import SchedulingPainter
 from .painter import SchedulingPainterVshape
 from .utils import resort_microbatch_index, resort_microbatch_index_Vshape
-
+import numpy as np
 
 class Simulator:
     """Simulator"""
@@ -379,7 +379,10 @@ class Simulator4DrawVshapeZero(Simulator):
         self._recomputation = config["recomputation"]
         self._back_activationMem = config["back_activationMem"]
         self._weight_activationMem = config["weight_activationMem"]
-        self._max_activation_counts = [_*(self._back_activationMem+self._weight_activationMem) for _ in self._max_activation_counts]
+        self._max_activation_counts = [self._max_activation_counts[i]*(self._back_activationMem[i]+self._weight_activationMem[i]) for i in range(len(self._max_activation_counts))]
+        if self._recomputation:
+            self._back_activationMem = [1 for _ in range(4)]
+
 
         #以下是精确计算
         self._layersPerStage = config["layersPerStage"]
@@ -388,38 +391,64 @@ class Simulator4DrawVshapeZero(Simulator):
         self._sequencelen = config["sequencelen"]
    
         F_timePerLayer = 6*self._hidden+self._sequencelen
+        B_timePerLayer = 6*self._hidden+self._sequencelen+2*self._sequencelen
         W_timePerLayer = 6*self._hidden
+
+        B_AcMemPerLayer = 34*self._hidden + 5*self._attentionheads*self._sequencelen
         W_AcMemPerLayer = 32*self._hidden
+        Max_AcMemPerstage= [_*(B_AcMemPerLayer+W_AcMemPerLayer) for _ in self._max_activation_counts]
 
         if self._recomputation:
             B_timePerLayer = 6*self._hidden+self._sequencelen+3*self._sequencelen
             B_AcMemPerLayer = 34*self._hidden
-        else: 
-            B_timePerLayer = 6*self._hidden+self._sequencelen+2*self._sequencelen
-            B_AcMemPerLayer = 34*self._hidden + 5*self._attentionheads*self._sequencelen
 
-        self.F_timePerStage = [_*F_timePerLayer for _ in self._layersPerStage]
-        self.B_timePerStage = [_*B_timePerLayer for _ in self._layersPerStage]
-        self.W_timePerStage = [_*W_timePerLayer for _ in self._layersPerStage]
+        F_timePerStage = [_*F_timePerLayer for _ in self._layersPerStage]
+        B_timePerStage = [_*B_timePerLayer for _ in self._layersPerStage]
+        W_timePerStage = [_*W_timePerLayer for _ in self._layersPerStage]
 
-        self.B_AcMemPerStage = [_*B_AcMemPerLayer for _ in self._layersPerStage]
-        self.W_AcMemPerStage = [_*W_AcMemPerLayer for _ in self._layersPerStage]
-        ###
+        B_AcMemPerStage = [_*B_AcMemPerLayer for _ in self._layersPerStage]
+        W_AcMemPerStage = [_*W_AcMemPerLayer for _ in self._layersPerStage]
+
+        #化简
+        Tnumbers = [F_timePerStage, B_timePerStage, W_timePerStage]
+        Tgcd_result = np.gcd.reduce(Tnumbers)
+        self.Tgcd_result =  np.gcd.reduce(Tgcd_result)
+        Tnumbers = Tnumbers/self.Tgcd_result*2 #乘以2是为了后面切分stage
+        self.F_timePerStage = Tnumbers[0]
+        self.B_timePerStage = Tnumbers[1]
+        self.W_timePerStage = Tnumbers[2]
+    
+        Mnumbers = [B_AcMemPerStage, W_AcMemPerStage, Max_AcMemPerstage]
+        Mgcd_result = np.gcd.reduce(Mnumbers)
+        Mgcd_result = np.gcd.reduce(Mgcd_result)
+        Mnumbers = Mnumbers/Mgcd_result
+        self.B_AcMemPerStage = Mnumbers[0]
+        self.W_AcMemPerStage = Mnumbers[1]
+        self.Max_AcMemPerstage = Mnumbers[2]
         
-        assert isinstance(
-            self._forward_length, (list, tuple)
-        ), "forward_execution_time must be list or tuple"
-        assert isinstance(
-            self._backward_length, (list, tuple)
-        ), "backward_execution_time must be list or tuple"
+        ### 懒得改一个一个变量名了
+        # self._forward_length = self.F_timePerStage
+        # self._backward_length = self.B_timePerStage
+        # self._weight_length = self.W_timePerStage
 
-        assert self._sequential_order_constraint_strategy in (
-            "strict",
-            "double_interleaving",
-            "full_interleaving",
-            "zero",
-            "double_interleaving_zero"
-        ), "sequential order constraint strategy is not supported"
+        # self._back_activationMem = self.B_AcMemPerStage
+        # self._weight_activationMem = self.W_AcMemPerStage
+        # self._max_activation_counts = self.Max_AcMemPerstage
+
+        # assert isinstance(
+        #     self._forward_length, (list, tuple)
+        # ), "forward_execution_time must be list or tuple"
+        # assert isinstance(
+        #     self._backward_length, (list, tuple)
+        # ), "backward_execution_time must be list or tuple"
+
+        # assert self._sequential_order_constraint_strategy in (
+        #     "strict",
+        #     "double_interleaving",
+        #     "full_interleaving",
+        #     "zero",
+        #     "double_interleaving_zero"
+        # ), "sequential order constraint strategy is not supported"
 
         self._solver = z3.Optimize()
         self._forward_offsets1 =  [[] for i in range(self._pp_size)]
@@ -669,11 +698,9 @@ class Simulator4DrawVshapeZero(Simulator):
                     )
 
     def _pipeline_activation_accumulation_constraint_Vshape(self):
-        if self._recomputation:
-            self._back_activationMem = 1
-        batch_activationMem = self._back_activationMem+self._weight_activationMem
         for pp in range(self._pp_size):
             # calculate the maximum activation value for this pp
+            batch_activationMem = self._back_activationMem[pp]+self._weight_activationMem[pp]
             for mb in range(self._num_microbatches):
                 #backward2
                 _actvaition_count = batch_activationMem
@@ -696,14 +723,14 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._weight_offsets1[pp][other_mb] > _backward_var,
                             self._backward_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        -self._back_activationMem,
+                        -self._back_activationMem[pp],
                         0,
                     )
                     _actvaition_count += z3.If(
                         z3.And(
                             self._weight_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        -self._weight_activationMem,
+                        -self._weight_activationMem[pp],
                         0,
                     )
 
@@ -721,14 +748,14 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._weight_offsets2[pp][other_mb] > _backward_var,
                             self._backward_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        -self._back_activationMem,
+                        -self._back_activationMem[pp],
                         0,
                     )
                     _actvaition_count += z3.If(
                         z3.And(
                             self._weight_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        -self._weight_activationMem,
+                        -self._weight_activationMem[pp],
                         0,
                     )
                 self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
@@ -753,14 +780,14 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._weight_offsets1[pp][other_mb] > _backward_var,
                             self._backward_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        -self._back_activationMem,
+                        -self._back_activationMem[pp],
                         0,
                     )
                     _actvaition_count += z3.If(
                         z3.And(
                             self._weight_offsets1[pp][other_mb] < _backward_var,
                         ),
-                        -self._weight_activationMem,
+                        -self._weight_activationMem[pp],
                         0,
                     )
 
@@ -777,14 +804,14 @@ class Simulator4DrawVshapeZero(Simulator):
                             self._weight_offsets2[pp][other_mb] > _backward_var,
                             self._backward_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        -self._back_activationMem,
+                        -self._back_activationMem[pp],
                         0,
                     )
                     _actvaition_count += z3.If(
                         z3.And(
                             self._weight_offsets2[pp][other_mb] < _backward_var,
                         ),
-                        -self._weight_activationMem,
+                        -self._weight_activationMem[pp],
                         0,
                     )
                 self._solver.add(_actvaition_count <= self._max_activation_counts[pp]*2)
@@ -850,6 +877,7 @@ class Simulator4DrawVshapeZero(Simulator):
             "forward_length2": self._forward_length2,
             "backward_length2": self._backward_length2,
             "weight_length2": self._weight_length2,
+            "Tgcd_result":self.Tgcd_result#缩放倍数
         }
 
         SchedulingPainterVshape(painter_conf).draw(results)

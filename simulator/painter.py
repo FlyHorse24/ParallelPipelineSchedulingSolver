@@ -164,7 +164,7 @@ class SchedulingPainterVshape:
         self._forward_length2 = [_len * config["pixel_base"] for _len in config["forward_length2"]]
         self._backward_length2 = [_len * config["pixel_base"] for _len in config["backward_length2"]]
         self._weight_length2 = [_len * config["pixel_base"] for _len in config["weight_length2"]] 
-        
+        self._Tgcd_result = config['Tgcd_result']
 
         self._tk_root = tk.Tk()
         self._tk_root.title("SchedulingPainter")
@@ -201,6 +201,7 @@ class SchedulingPainterVshape:
             self._pp_align + 127,
             y_label,
             text=f"{(data[max_key] + self._weight_length2[max_key_pid])//self._pixel_base}",
+            #text=f"{((data[max_key] + self._weight_length2[max_key_pid])//self._pixel_base)/2*self._Tgcd_result}",
         )
 
         label_canvas.create_text(
